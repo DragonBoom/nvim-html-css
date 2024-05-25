@@ -10,18 +10,8 @@ local tsu = require("nvim-treesitter.ts_utils")
 local parsers = require 'nvim-treesitter.parsers'
 
 local scan = require("plenary.scandir")
-local rootDir = scan.scan_dir(".", {
-	hidden = true,
-	add_dirs = true,
-	depth = 1,
-	respect_gitignore = true,
-	search_pattern = function(entry)
-		local subEntry = entry:sub(3) -- remove ./
-		-- %f[%a]git%f[^%a] -- old regex for matching .git
-		return subEntry:match(".git$") or
-				subEntry:match("package.json") -- if project contains .git folder or package.json its gonna work
-	end,
-})
+-- just a flag...
+Source.rootDir = {} -- so can debug
 
 local function mrgtbls(t1, t2)
 	for _, v in ipairs(t2) do
@@ -32,6 +22,32 @@ end
 
 function Source:setup()
 	require("cmp").register_source(self.source_name, Source)
+
+  local group = vim.api.nvim_create_augroup('html-css', { clear = true })
+	vim.api.nvim_create_autocmd('BufEnter', {
+		group = group,
+		callback = function()
+			if not vim.tbl_contains(self.option.enable_on, vim.bo.filetype) then
+				return false
+			end
+			self:update_dir()
+		end,
+	})
+end
+
+function Source:update_dir()
+	Source.rootDir = scan.scan_dir(".", {
+		hidden = true,
+		add_dirs = true,
+		depth = 1,
+		respect_gitignore = true,
+		search_pattern = function(entry)
+			local subEntry = entry:sub(3) -- remove ./
+			-- %f[%a]git%f[^%a] -- old regex for matching .git
+			return subEntry:match(".git$") or
+					subEntry:match("package.json") -- if project contains .git folder or package.json its gonna work
+		end,
+	})
 end
 
 function Source:new()
@@ -56,7 +72,7 @@ function Source:new()
 	local git_folder_exists = vim.fn.isdirectory(current_directory .. "/.git")
 
 	-- if git_folder_exists == 1 then
-	if vim.tbl_count(rootDir) ~= 0 then
+	if vim.tbl_count(Source.rootDir) ~= 0 then
 		self.href_links = h.get_hrefs()
 		self.style_sheets = mrgtbls(self.style_sheets, self.href_links) -- merge lings together
 
@@ -103,7 +119,7 @@ function Source:new()
 end
 
 function Source:complete(_, callback)
-	if vim.tbl_count(rootDir) ~= 0 then
+	if vim.tbl_count(Source.rootDir) ~= 0 then
 		self.items = {}
 		self.ids = {}
 
@@ -153,6 +169,8 @@ function Source:is_available()
 		return false
 	end
 
+	if not Source.rootDir then return false end
+
 	local bufnr = vim.api.nvim_get_current_buf()
 	local parser = parsers.get_parser(bufnr)
 	local node_at_cursor = tsu.get_node_at_cursor()
@@ -174,7 +192,10 @@ function Source:is_available()
 				end
 				break
 			end
-			current_node = current_node:prev_named_sibling()
+			current_node = current_node:parent()
+			if current_node then
+					current_node = current_node:prev_named_sibling()
+			end
 		else
 			if current_node:type() == "jsx_attribute" then
 				if current_node:child(0):type() == "property_identifier" then
